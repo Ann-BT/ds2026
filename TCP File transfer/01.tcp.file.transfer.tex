@@ -1,0 +1,127 @@
+\documentclass[a4paper,12pt]{article}
+
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{courier}
+\usepackage{hyperref}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true
+}
+
+\title{Practical Work 1: TCP File Transfer}
+\author{Name: Bui Truong An - 22BA13001}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Goal}
+The objective of this practical work is to implement a one-to-one file transfer over TCP/IP using a command-line interface. The system is based on the provided chat architecture and must include:
+\begin{itemize}
+    \item One server
+    \item One client
+    \item Communication through TCP sockets
+\end{itemize}
+
+\section{Protocol Design}
+We designed a simple application-level protocol for file transfer:
+\begin{itemize}
+    \item The client sends a \texttt{REQUEST <filename>} command to the server.
+    \item The server checks if the file exists.
+    \item If the file exists, the server responds with \texttt{OK <filesize>} and starts sending raw bytes.
+    \item If the file does not exist, the server responds \texttt{ERROR}.
+\end{itemize}
+
+\subsection*{Protocol Diagram}
+
+\begin{verbatim}
+Client                             Server
+  |                                  |
+  |--- REQUEST filename -----------> |
+  |                                  |
+  | <----- OK filesize ------------- |
+  |                                  |
+  | <----- file data bytes --------- |
+  |                                  |
+\end{verbatim}
+
+\section{System Organization}
+
+\subsection*{Architecture Overview}
+The system consists of two standalone programs:
+
+\begin{itemize}
+    \item \textbf{Server}: waits for TCP connections and sends files.
+    \item \textbf{Client}: connects to the server and receives files.
+\end{itemize}
+
+\subsection*{System Diagram}
+
+\begin{verbatim}
++-----------+        TCP        +-----------+
+|  Client   | <----------------> |  Server   |
++-----------+                    +-----------+
+       |                             |
+       | requests file               | reads and sends file
+       | saves received file         | handles error conditions
+\end{verbatim}
+
+\section{Implementation}
+
+Below are simplified code snippets showing the implementation idea.
+
+\subsection{Server Code Snippet }
+\begin{lstlisting}[language=Python]
+import socket, os
+
+s = socket.socket()
+s.bind(("0.0.0.0", 9000))
+s.listen(1)
+
+conn, addr = s.accept()
+request = conn.recv(1024).decode()
+
+cmd, filename = request.split()
+
+if cmd == "REQUEST" and os.path.isfile(filename):
+    size = os.path.getsize(filename)
+    conn.send(f"OK {size}".encode())
+    
+    with open(filename, "rb") as f:
+        conn.sendall(f.read())
+else:
+    conn.send(b"ERROR")
+
+conn.close()
+s.close()
+\end{lstlisting}
+
+\subsection{Client Code Snippet }
+\begin{lstlisting}[language=Python]
+import socket
+
+filename = "example.txt"
+s = socket.socket()
+s.connect(("127.0.0.1", 9000))
+
+s.send(f"REQUEST {filename}".encode())
+response = s.recv(1024).decode()
+
+status, value = response.split()
+
+if status == "OK":
+    size = int(value)
+    data = b""
+    while len(data) < size:
+        data += s.recv(4096)
+
+    with open("received_" + filename, "wb") as f:
+        f.write(data)
+
+s.close()
+\end{lstlisting}
+
+\end{document}

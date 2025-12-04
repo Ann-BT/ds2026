@@ -1,0 +1,198 @@
+\documentclass[a4paper,12pt]{article}
+
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{courier}
+\usepackage{hyperref}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single
+}
+
+\title{RPC File Transfer System}
+\author{Bui Truong An - 22BA13001}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+This report presents the design and implementation of a file transfer system using 
+Remote Procedure Call (RPC) over XML-RPC.  
+The system supports chunk-based file upload, transfer verification, and server-side file listing.
+
+The implementation consists of a Python RPC server and a Python RPC client that communicates using XML-RPC over HTTP.
+
+\section{RPC Service Design}
+
+\subsection{Service Overview}
+The RPC service exposes the following remote procedures:
+
+\begin{itemize}
+    \item \texttt{start\_transfer(filename, filesize)}
+    \item \texttt{upload\_chunk(transfer\_id, chunk\_data, chunk\_number)}
+    \item \texttt{finish\_transfer(transfer\_id)}
+    \item \texttt{cancel\_transfer(transfer\_id)}
+    \item \texttt{list\_files()}
+    \item \texttt{ping()}
+\end{itemize}
+
+Each file transfer session is identified by a unique \texttt{transfer\_id} which allows the server to track progress.
+
+\subsection{RPC Workflow Figure}
+
+\begin{verbatim}
++-----------+             RPC (XML-RPC)             +-------------+
+|  Client   | ------------------------------------> |   Server    |
++-----------+                                        +-------------+
+      |                                                    |
+      | start_transfer(filename, filesize)                 |
+      |--------------------------------------------------->|
+      |                                                    |
+      | upload_chunk(transfer_id, base64data, n)           |
+      |--------------------------------------------------->|
+      |                                                    |
+      | finish_transfer(transfer_id)                       |
+      |--------------------------------------------------->|
+      |                                                    |
+      | <----------------------- success / fail -----------|
+\end{verbatim}
+
+This workflow ensures reliable transfer using chunk-by-chunk upload with base64 encoding.
+
+\section{System Organization}
+
+\subsection{Modules}
+The system is divided into two core components:
+
+\begin{itemize}
+    \item \textbf{RPC Server}: Handles storage, chunk writes, and file assembly.
+    \item \textbf{RPC Client}: Reads files, encodes chunks, and uploads them.
+\end{itemize}
+
+\subsection{System Architecture Figure}
+
+\begin{verbatim}
++--------------------------------------------------------------+
+|                          RPC Server                          |
+|--------------------------------------------------------------|
+|  - start_transfer()                                          |
+|  - upload_chunk()                                            |
+|  - finish_transfer()                                         |
+|  - cancel_transfer()                                         |
+|  - list_files()                                              |
+|                                                              |
+|  File Storage: /uploads                                      |
++--------------------------------------------------------------+
+
+                ▲                                   
+                | XML-RPC over HTTP                
+                ▼                                   
+
++--------------------------------------------------------------+
+|                          RPC Client                          |
+|--------------------------------------------------------------|
+|  - connect()                                                 |
+|  - send_file()                                               |
+|  - list_server_files()                                       |
++--------------------------------------------------------------+
+\end{verbatim}
+
+\section{Implementation}
+
+This section shows the essential parts of the code implementing the file transfer.
+
+\subsection{Server-Side Code Snippets}
+
+\subsubsection{Start Transfer}
+
+\begin{lstlisting}[language=Python]
+def start_transfer(self, filename, filesize):
+    transfer_id = f"{filename}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    save_filename = f"received_{timestamp}_{filename}"
+    
+    filepath = os.path.join(self.upload_dir, save_filename)
+    self.active_transfers[transfer_id] = {
+        'filename': filename,
+        'filepath': filepath,
+        'filesize': filesize,
+        'received': 0,
+        'file_handle': open(filepath, 'wb')
+    }
+    
+    return {'status': 'success', 'transfer_id': transfer_id}
+\end{lstlisting}
+
+\subsubsection{Upload Chunk}
+
+\begin{lstlisting}[language=Python]
+def upload_chunk(self, transfer_id, chunk_data, chunk_number):
+    transfer = self.active_transfers[transfer_id]
+    binary_data = base64.b64decode(chunk_data)
+    
+    transfer['file_handle'].write(binary_data)
+    transfer['received'] += len(binary_data)
+    
+    return {'status': 'success', 'progress': progress}
+\end{lstlisting}
+
+\subsubsection{Finish Transfer}
+\begin{lstlisting}[language=Python]
+def finish_transfer(self, transfer_id):
+    transfer = self.active_transfers[transfer_id]
+    transfer['file_handle'].close()
+    
+    actual_size = os.path.getsize(transfer['filepath'])
+    
+    if actual_size == transfer['filesize']:
+        del self.active_transfers[transfer_id]
+        return {'status': 'success', 'filepath': transfer['filepath']}
+\end{lstlisting}
+
+\subsection{Client-Side Code Snippets}
+
+\subsubsection{Connect to Server}
+
+\begin{lstlisting}[language=Python]
+self.proxy = xmlrpc.client.ServerProxy(self.server_url, allow_none=True)
+response = self.proxy.ping()
+\end{lstlisting}
+
+\subsubsection{Start File Transfer}
+
+\begin{lstlisting}[language=Python]
+response = self.proxy.start_transfer(filename, filesize)
+transfer_id = response['transfer_id']
+\end{lstlisting}
+
+\subsubsection{Upload File Chunks}
+
+\begin{lstlisting}[language=Python]
+with open(filepath, 'rb') as f:
+    while True:
+        chunk = f.read(self.chunk_size)
+        if not chunk:
+            break
+        
+        encoded_chunk = base64.b64encode(chunk).decode('utf-8')
+        self.proxy.upload_chunk(transfer_id, encoded_chunk, chunk_number)
+\end{lstlisting}
+
+\subsubsection{Finish Transfer}
+
+\begin{lstlisting}[language=Python]
+response = self.proxy.finish_transfer(transfer_id)
+if response['status'] == 'success':
+    print("Transfer completed!")
+\end{lstlisting}
+
+\section{Conclusion}
+
+The RPC-based file transfer system successfully supports large file uploads by splitting them into base64-encoded chunks.  
+This design ensures that transfers can be tracked, canceled, and verified on the server.  
+The architecture cleanly separates responsibilities between the RPC server and the client.
+
+\end{document}

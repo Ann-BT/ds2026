@@ -1,0 +1,118 @@
+\documentclass[12pt]{article}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{caption}
+
+\title{MPI-Based Parallel File Transfer System}
+\author{Bui Truong An - 22BA13001 }
+\date{ }
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single
+}
+
+\begin{document}
+\maketitle
+
+\section{Choice of MPI Implementation}
+For this project, I chose \textbf{mpi4py} as the MPI implementation. The reasons include:
+\begin{itemize}
+    \item \textbf{High-level Python interface}: mpi4py wraps the standard MPI API while allowing fast development in Python without sacrificing performance.
+    \item \textbf{Full MPI-1 and MPI-2 support}: Features such as point–to–point messaging, communicators, non-blocking operations, and collective communication are supported.
+    \item \textbf{Easy integration with file I/O}: Since the project requires file splitting, reading binary chunks, and writing temporary files, Python simplifies implementation.
+    \item \textbf{Portability}: Works on OpenMPI, MPICH, and most HPC systems.
+\end{itemize}
+
+\section{MPI Service Design}
+The system operates using a \textbf{master–worker architecture}. Rank 0 acts as the master server, while ranks 1..N are workers that receive assigned file chunks.
+
+\begin{verbatim}
++------------------------------------+
+|            MASTER (rank 0)         |
+| - receive transfer request         |
+| - assign chunk ranges to workers   |
+| - collect status & finalize file   |
++------------------------------------+
+                / | \
+               /  |  \
+              /   |   \
+             v    v    v
++----------+  +----------+  +----------+
+| WORKER 1 |  | WORKER 2 |  | WORKER N |
+| (rank 2) |  | (rank 3) |  | (rank N) |
++----------+  +----------+  +----------+
+      ^             ^             ^
+       \            |            /
+        \           |           /
+         \          |          /
+          v         v         v
+       +--------------------------+
+       |       CLIENT (rank 1)    |
+       | - send request & chunks  |
+       +--------------------------+
+\end{verbatim}
+
+Workflow summary:
+\begin{enumerate}
+  \item Client (rank 1) sends metadata to Master (rank 0).
+  \item Master computes chunk ranges and sends assignments to Workers.
+  \item Client streams chunked messages (tagged) directly to Workers.
+  \item Workers write partial files and notify Master when done.
+  \item Master acknowledges completion to Client and records saved file.
+\end{enumerate}
+
+\section{System Organization}
+The implementation separates concerns into three logical components.
+
+\begin{verbatim}
++---------------------------------------------------------+
+|                   FILE TRANSFER SYSTEM                  |
+|                                                         |
+|  [Client]   <-->   [Master / Coordinator]   <-->  [Workers]  |
+|  (chunking,        (assign ranges,               (receive,
+|   stream)           metadata, finalize)           write .part)|
++---------------------------------------------------------+
+
+Temp files: uploads/received_<timestamp>_filename.part<rank>
+\end{verbatim}
+
+\section{File Transfer Implementation}
+Below is a representative code snippet from the client and server showing how MPI-based file transfer is implemented.
+
+\subsection{Client: Sending Chunks}
+\begin{lstlisting}[caption={Client sending file chunks}]
+for chunk_num, chunk_data in enumerate(chunks):
+    self.comm.send({'data': chunk_data},
+                   dest=MPI.ANY_SOURCE,
+                   tag=100 + chunk_num)
+\end{lstlisting}
+
+\subsection{Server Worker: Receiving Chunks}
+\begin{lstlisting}[caption={Worker receiving assigned chunks}]
+with open(temp_file, 'wb') as f:
+    for chunk_num in range(start_chunk, end_chunk):
+        chunk_data = self.comm.recv(
+            source=source_rank,
+            tag=100 + chunk_num
+        )
+        f.write(chunk_data['data'])
+\end{lstlisting}
+
+\subsection{Master: Distributing Work}
+\begin{lstlisting}[caption={Master assigning chunk ranges}]
+work_data = {
+    'source_rank': source_rank,
+    'start_chunk': start_chunk,
+    'end_chunk': end_chunk,
+    'filepath': filepath
+}
+self.comm.send(work_data, dest=worker, tag=10)
+\end{lstlisting}
+
+\section{Conclusion}
+The ascii-figure based report keeps diagrams simple, portable, and easy to read while preserving the full description of the master–worker MPI file-transfer design implemented with \texttt{mpi4py}.
+
+\end{document}
